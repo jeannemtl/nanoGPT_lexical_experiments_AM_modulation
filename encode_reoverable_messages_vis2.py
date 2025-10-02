@@ -13,7 +13,8 @@ import glob
 def create_improved_3d_visualization():
     """Create multiple visualization styles for clearer sideband analysis"""
     
-    json_files = sorted(glob.glob('nanogpt_*_data.json'))
+    # json_files = sorted(glob.glob('nanogpt_*_data.json'))
+    json_files = sorted(glob.glob('nanogpt_freq_div_*_data.json'))
     
     if len(json_files) < 2:
         print("Need at least 2 datasets. Generate them first.")
