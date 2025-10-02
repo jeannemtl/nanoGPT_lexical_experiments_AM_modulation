@@ -74,9 +74,21 @@ class FrequencyDivisionModulator:
     
     def _detect_peaks(self, frequencies, magnitude, threshold=0.1):
         """Detect carrier and sideband peaks"""
-        max_idx = np.argmax(magnitude)
-        carrier_freq = frequencies[max_idx]
-        carrier_mag = magnitude[max_idx]
+        # Look for carrier near expected frequency (1/3)
+        expected_carrier = 1/3
+        carrier_mask = np.abs(frequencies - expected_carrier) < 0.05
+        
+        if np.any(carrier_mask):
+            local_mags = magnitude[carrier_mask]
+            local_freqs = frequencies[carrier_mask]
+            local_max_idx = np.argmax(local_mags)
+            carrier_freq = local_freqs[local_max_idx]
+            carrier_mag = local_mags[local_max_idx]
+        else:
+            # Fallback to global max
+            max_idx = np.argmax(magnitude)
+            carrier_freq = frequencies[max_idx]
+            carrier_mag = magnitude[max_idx]
         
         peaks = {'carrier': {'frequency': carrier_freq, 'magnitude': carrier_mag}}
         
