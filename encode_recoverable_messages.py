@@ -9,6 +9,7 @@ import re
 import torch
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
 import random
+import json
 
 class BinaryMessageEncoder:
     """Encodes binary messages into TTR patterns"""
@@ -18,7 +19,7 @@ class BinaryMessageEncoder:
         self.n_sentences = n_sentences
         self.carrier_freq = carrier_freq
         self.ttr_min = ttr_min
-        self.ttr_max = ttr_max
+        self.ttr_max = ttr_maxf
         self.bits_per_cycle = bits_per_cycle
         self.sentences_per_bit = int(1 / carrier_freq)  # ~3 sentences per bit
         
@@ -264,6 +265,34 @@ def encode_and_generate(message, topic="artificial intelligence", n_sentences=10
     accuracy = correct_bits / len(binary) * 100 if binary else 0
     print(f"Bit accuracy: {correct_bits}/{len(binary)} ({accuracy:.1f}%)")
     print()
+
+    print(f"Bit accuracy: {correct_bits}/{len(binary)} ({accuracy:.1f}%)")
+    print()
+    
+    # ADD THIS BLOCK HERE:
+
+    
+    result = {
+        'topic': f"Message: {message}",
+        'message': message,
+        'n_sentences': n_sentences,
+        'target_diversities': target_ttr.tolist(),
+        'actual_diversities': list(actual_ttr_array),
+        'sentences': sentences,
+        'correlation': 0,
+        'decoded_message': decoded_message,
+        'bit_accuracy': accuracy
+    }
+    
+    with open(f'nanogpt_message_{message}_data.json', 'w') as f:
+        json.dump(result, f, indent=2)
+    
+    print(f"✓ Saved JSON: nanogpt_message_{message}_data.json")
+    print()
+    # END OF NEW CODE
+    
+    # Visualize (existing code continues)
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 8))
     
     # Visualize
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 8))
