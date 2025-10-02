@@ -19,7 +19,7 @@ class BinaryMessageEncoder:
         self.n_sentences = n_sentences
         self.carrier_freq = carrier_freq
         self.ttr_min = ttr_min
-        self.ttr_max = ttr_maxf
+        self.ttr_max = ttr_max
         self.bits_per_cycle = bits_per_cycle
         self.sentences_per_bit = int(1 / carrier_freq)  # ~3 sentences per bit
         
