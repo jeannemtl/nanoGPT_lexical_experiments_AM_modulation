@@ -40,9 +40,9 @@ def create_improved_3d_visualization():
         n = len(signal)
         
         # Remove DC component and normalize
-        signal_centered = signal - np.mean(signal)
-        # signal_normalized = signal_centered / np.std(signal_centered)
-        signal_normalized = signal / np.std(signal)
+        # Don't remove DC component - preserve carrier
+        signal_centered = signal
+        signal_normalized = signal_centered / np.std(signal_centered)
         
         # Apply window to reduce spectral leakage
         window = np.hanning(n)
