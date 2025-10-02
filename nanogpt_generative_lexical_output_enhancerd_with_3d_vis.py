@@ -1,6 +1,5 @@
 """
-Enhanced multi-run generator that produces high-correlation datasets
-for clean 3D waterfall visualization
+Improved 3D visualization focusing on accurate sideband display
 """
 
 import numpy as np
@@ -9,370 +8,17 @@ from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.animation import FuncAnimation, PillowWriter
 import json
 import glob
-import torch
-from transformers import GPT2LMHeadModel, GPT2Tokenizer
-import re
-import random
 
-class LexicalDiversityModulator:
-    """Generates target TTR values with AM modulation pattern."""
-    
-    def __init__(self, n_sentences=100, carrier_freq=1/3, envelope_freq=0.05, 
-                 modulation_depth=0.6, ttr_min=0.4, ttr_max=0.9):
-        self.n_sentences = n_sentences
-        self.carrier_freq = carrier_freq
-        self.envelope_freq = envelope_freq
-        self.modulation_depth = modulation_depth
-        self.ttr_min = ttr_min
-        self.ttr_max = ttr_max
-        self.target_ttr = self._generate_target_ttr()
-        
-    def _generate_target_ttr(self):
-        n = np.arange(self.n_sentences)
-        carrier = np.cos(2 * np.pi * self.carrier_freq * n)
-        envelope = 1 + self.modulation_depth * np.cos(2 * np.pi * self.envelope_freq * n)
-        modulated = carrier * envelope
-        normalized = (modulated + (1 + self.modulation_depth)) / (2 * (1 + self.modulation_depth))
-        return self.ttr_min + normalized * (self.ttr_max - self.ttr_min)
-    
-    def calculate_ttr(self, text):
-        words = re.findall(r'\b\w+\b', text.lower())
-        if len(words) == 0:
-            return 0
-        return len(set(words)) / len(words)
-    
-    def get_target_ttr(self, step):
-        return self.target_ttr[step]
-
-
-class EnhancedGenerator:
-    """Enhanced generator with strict TTR control (same as generative.py)"""
-    
-    def __init__(self, model_name='gpt2'):
-        print(f"Loading {model_name}...")
-        self.tokenizer = GPT2Tokenizer.from_pretrained(model_name)
-        self.model = GPT2LMHeadModel.from_pretrained(model_name)
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.model.to(self.device)
-        self.model.eval()
-        
-        if self.tokenizer.pad_token is None:
-            self.tokenizer.pad_token = self.tokenizer.eos_token
-        
-        self.filler_words = ['the', 'a', 'an', 'this', 'that', 'these', 'those', 
-                            'it', 'there', 'here', 'very', 'quite', 'rather', 'just']
-        self.unique_adverbs = ['accordingly', 'additionally', 'alternatively', 'certainly',
-                              'consequently', 'conversely', 'furthermore', 'hence', 
-                              'however', 'indeed', 'likewise', 'meanwhile', 'moreover',
-                              'nevertheless', 'nonetheless', 'subsequently', 'therefore',
-                              'thus', 'ultimately', 'undoubtedly']
-        
-        print(f"✓ Model loaded on {self.device}")
-    
-    def calculate_ttr(self, text):
-        words = re.findall(r'\b\w+\b', text.lower())
-        if len(words) == 0:
-            return 0
-        return len(set(words)) / len(words)
-    
-    def generate_sentence(self, step, target_ttr, topic, max_attempts=10, tolerance=0.08):
-        """Generate sentence with strict TTR matching"""
-        
-        if target_ttr < 0.55:
-            sentence = self._generate_low_ttr_sentence(step, target_ttr, topic, max_attempts, tolerance)
-        elif target_ttr > 0.75:
-            sentence = self._generate_high_ttr_sentence(step, target_ttr, topic, max_attempts, tolerance)
-        else:
-            sentence = self._generate_medium_ttr_sentence(step, target_ttr, topic, max_attempts, tolerance)
-        
-        return sentence
-    
-    def _generate_low_ttr_sentence(self, step, target_ttr, topic, max_attempts, tolerance):
-        """Generate sentence with low TTR (heavy repetition)"""
-        
-        templates = [
-            "In step {step} we see the {topic} and we see the {topic} again and again.",
-            "The {topic} shows the {topic} and the {topic} shows more about the {topic}.",
-            "We have the {topic} here and we have the {topic} there and the {topic} is clear.",
-            "Step {step} has the {topic} and step {step} shows the {topic} very clearly.",
-        ]
-        
-        best_sentence = None
-        best_error = float('inf')
-        
-        for attempt in range(max_attempts):
-            if attempt < 3:
-                template = random.choice(templates)
-                sentence = template.format(step=step, topic=topic)
-            else:
-                sentence = self._generate_with_gpt2(
-                    step, target_ttr, topic,
-                    temperature=0.4,
-                    top_p=0.6,
-                    repetition_penalty=0.8,
-                    max_length=30
-                )
-            
-            sentence = self._adjust_ttr_down(sentence, target_ttr)
-            actual_ttr = self.calculate_ttr(sentence)
-            error = abs(actual_ttr - target_ttr)
-            
-            if error < best_error:
-                best_error = error
-                best_sentence = sentence
-            
-            if error < tolerance:
-                break
-        
-        return best_sentence if best_sentence else f"Step {step} examines the {topic}."
-    
-    def _generate_medium_ttr_sentence(self, step, target_ttr, topic, max_attempts, tolerance):
-        """Generate sentence with medium TTR"""
-        
-        best_sentence = None
-        best_error = float('inf')
-        
-        for attempt in range(max_attempts):
-            sentence = self._generate_with_gpt2(
-                step, target_ttr, topic,
-                temperature=0.6 + (attempt * 0.05),
-                top_p=0.85,
-                repetition_penalty=1.0,
-                max_length=40
-            )
-            
-            actual_ttr = self.calculate_ttr(sentence)
-            if actual_ttr < target_ttr - 0.05:
-                sentence = self._adjust_ttr_up(sentence, target_ttr)
-            elif actual_ttr > target_ttr + 0.05:
-                sentence = self._adjust_ttr_down(sentence, target_ttr)
-            
-            actual_ttr = self.calculate_ttr(sentence)
-            error = abs(actual_ttr - target_ttr)
-            
-            if error < best_error:
-                best_error = error
-                best_sentence = sentence
-            
-            if error < tolerance:
-                break
-        
-        return best_sentence if best_sentence else f"Phase {step} investigates {topic}."
-    
-    def _generate_high_ttr_sentence(self, step, target_ttr, topic, max_attempts, tolerance):
-        """Generate sentence with high TTR (maximum diversity)"""
-        
-        best_sentence = None
-        best_error = float('inf')
-        
-        for attempt in range(max_attempts):
-            sentence = self._generate_with_gpt2(
-                step, target_ttr, topic,
-                temperature=0.9 + (attempt * 0.02),
-                top_p=0.95,
-                repetition_penalty=1.3,
-                max_length=45,
-                no_repeat_ngram_size=3
-            )
-            
-            sentence = self._adjust_ttr_up(sentence, target_ttr)
-            actual_ttr = self.calculate_ttr(sentence)
-            error = abs(actual_ttr - target_ttr)
-            
-            if error < best_error:
-                best_error = error
-                best_sentence = sentence
-            
-            if error < tolerance:
-                break
-        
-        return best_sentence if best_sentence else f"Throughout interval {step}, researchers systematically investigate multifaceted {topic} phenomena."
-    
-    def _generate_with_gpt2(self, step, target_ttr, topic, temperature, top_p, 
-                           repetition_penalty, max_length, no_repeat_ngram_size=None):
-        """Generate text using GPT-2"""
-        
-        if target_ttr < 0.6:
-            style = "using simple repetitive language"
-        elif target_ttr < 0.75:
-            style = "clearly and professionally"
-        else:
-            style = "using sophisticated and diverse vocabulary"
-        
-        prompt = f"Write one sentence about {topic} {style}:"
-        
-        try:
-            inputs = self.tokenizer(prompt, return_tensors='pt').to(self.device)
-            
-            gen_kwargs = {
-                'max_length': inputs['input_ids'].shape[1] + max_length,
-                'num_return_sequences': 1,
-                'temperature': temperature,
-                'top_p': top_p,
-                'repetition_penalty': repetition_penalty,
-                'do_sample': True,
-                'pad_token_id': self.tokenizer.pad_token_id,
-                'eos_token_id': self.tokenizer.eos_token_id,
-            }
-            
-            if no_repeat_ngram_size:
-                gen_kwargs['no_repeat_ngram_size'] = no_repeat_ngram_size
-            
-            with torch.no_grad():
-                outputs = self.model.generate(**inputs, **gen_kwargs)
-            
-            generated_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-            sentence = generated_text[len(prompt):].strip()
-            sentence = self._clean_sentence(sentence)
-            
-            return sentence
-            
-        except Exception as e:
-            return f"Step {step} examines {topic}."
-    
-    def _adjust_ttr_down(self, sentence, target_ttr):
-        """Lower TTR by adding repetitive words"""
-        current_ttr = self.calculate_ttr(sentence)
-        
-        if current_ttr <= target_ttr + 0.02:
-            return sentence
-        
-        sentence = sentence.rstrip('.')
-        words = re.findall(r'\b\w+\b', sentence.lower())
-        common_in_sentence = [w for w in words if w in self.filler_words]
-        
-        if common_in_sentence:
-            words_to_add = [random.choice(common_in_sentence) for _ in range(3)]
-        else:
-            words_to_add = random.sample(self.filler_words[:5], 3)
-        
-        sentence = sentence + ' ' + ' '.join(words_to_add) + '.'
-        return sentence
-    
-    def _adjust_ttr_up(self, sentence, target_ttr):
-        """Increase TTR by adding unique words"""
-        current_ttr = self.calculate_ttr(sentence)
-        
-        if current_ttr >= target_ttr - 0.02:
-            return sentence
-        
-        sentence = sentence.rstrip('.')
-        words = re.findall(r'\b\w+\b', sentence.lower())
-        available_adverbs = [adv for adv in self.unique_adverbs if adv not in words]
-        
-        if available_adverbs:
-            num_to_add = min(2, len(available_adverbs))
-            selected = random.sample(available_adverbs, num_to_add)
-            sentence = ' '.join([sentence] + selected) + '.'
-        
-        return sentence
-    
-    def _clean_sentence(self, text):
-        """Clean up generated text"""
-        sentences = re.split(r'[.!?]+', text)
-        sentence = sentences[0].strip() if sentences else text.strip()
-        sentence = ' '.join(sentence.split())
-        
-        if sentence and not sentence[-1] in '.!?':
-            sentence += '.'
-        
-        if sentence:
-            sentence = sentence[0].upper() + sentence[1:]
-        
-        return sentence
-
-
-def generate_dataset_for_topic(topic, n_sentences=100, model_name='gpt2', tolerance=0.08):
-    """Generate a single dataset with high correlation"""
-    
-    print(f"\n{'='*70}")
-    print(f"Generating: {topic}")
-    print(f"{'='*70}")
-    
-    modulator = LexicalDiversityModulator(n_sentences=n_sentences)
-    generator = EnhancedGenerator(model_name=model_name)
-    
-    sentences = []
-    actual_ttrs = []
-    errors = []
-    
-    for step in range(n_sentences):
-        target_ttr = modulator.get_target_ttr(step)
-        sentence = generator.generate_sentence(step, target_ttr, topic, tolerance=tolerance)
-        actual_ttr = modulator.calculate_ttr(sentence)
-        error = abs(actual_ttr - target_ttr)
-        
-        sentences.append(sentence)
-        actual_ttrs.append(actual_ttr)
-        errors.append(error)
-        
-        status = "✓" if error < tolerance else "○"
-        if (step + 1) % 10 == 0:
-            print(f"[{step+1:3d}/{n_sentences}] {status} Target: {target_ttr:.3f} | Actual: {actual_ttr:.3f} | Error: {error:.3f}")
-    
-    correlation = np.corrcoef(modulator.target_ttr, actual_ttrs)[0, 1]
-    mean_error = np.mean(errors)
-    within_tolerance = np.sum(np.array(errors) < tolerance)
-    
-    print(f"\n{'='*70}")
-    print(f"Results for: {topic}")
-    print(f"{'='*70}")
-    print(f"Correlation: {correlation:.4f} {'✓' if correlation > 0.85 else '✗'}")
-    print(f"Mean Error: {mean_error:.4f}")
-    print(f"Within Tolerance: {within_tolerance}/{n_sentences} ({100*within_tolerance/n_sentences:.1f}%)")
-    
-    # Save JSON
-    result = {
-        'topic': topic,
-        'n_sentences': n_sentences,
-        'target_diversities': modulator.target_ttr.tolist(),
-        'actual_diversities': actual_ttrs,
-        'sentences': sentences,
-        'correlation': correlation,
-        'mean_error': mean_error
-    }
-    
-    filename = f"nanogpt_{topic.replace(' ', '_')}_data.json"
-    with open(filename, 'w') as f:
-        json.dump(result, f, indent=2)
-    print(f"✓ Saved: {filename}\n")
-    
-    return result
-
-
-def generate_all_datasets(topics, n_sentences=100):
-    """Generate datasets for all topics"""
-    
-    print("="*70)
-    print("MULTI-DATASET GENERATION FOR 3D VISUALIZATION")
-    print("="*70)
-    
-    results = []
-    for topic in topics:
-        result = generate_dataset_for_topic(topic, n_sentences)
-        results.append(result)
-    
-    print("\n" + "="*70)
-    print("ALL DATASETS GENERATED")
-    print("="*70)
-    for r in results:
-        print(f"  {r['topic']}: correlation={r['correlation']:.3f}")
-    
-    return results
-
-
-def create_3d_waterfall_gif():
-    """Create 3D rotating waterfall visualization"""
+def create_improved_3d_visualization():
+    """Create multiple visualization styles for clearer sideband analysis"""
     
     json_files = sorted(glob.glob('nanogpt_*_data.json'))
     
     if len(json_files) < 2:
-        print("Need at least 2 datasets for 3D visualization")
+        print("Need at least 2 datasets. Generate them first.")
         return
     
-    print(f"\n{'='*70}")
-    print(f"Creating 3D Visualization from {len(json_files)} datasets")
-    print(f"{'='*70}\n")
+    print(f"Loading {len(json_files)} datasets...")
     
     topics = []
     all_spectra = []
@@ -386,116 +32,296 @@ def create_3d_waterfall_gif():
         topics.append(topic)
         correlations.append(result.get('correlation', 0))
         
-        # Compute FFT
+        # Compute FFT with proper normalization
         signal = np.array(result['actual_diversities'])
-        signal = (signal - np.mean(signal)) / (np.std(signal) + 1e-10)
+        n = len(signal)
         
-        fft_result = np.fft.fft(signal)
-        freqs = np.fft.fftfreq(len(signal), d=1.0)
+        # Remove DC component and normalize
+        signal_centered = signal - np.mean(signal)
+        signal_normalized = signal_centered / np.std(signal_centered)
         
+        # Apply window to reduce spectral leakage
+        window = np.hanning(n)
+        signal_windowed = signal_normalized * window
+        
+        # Compute FFT
+        fft_result = np.fft.fft(signal_windowed)
+        freqs = np.fft.fftfreq(n, d=1.0)
+        
+        # Get positive frequencies only
         pos_mask = freqs > 0
         pos_freqs = freqs[pos_mask]
         pos_magnitudes = np.abs(fft_result[pos_mask])
         
         all_spectra.append((pos_freqs, pos_magnitudes))
-        print(f"  {topic}: correlation={correlations[-1]:.3f}")
+        print(f"  {topic}: r={correlations[-1]:.3f}, max_magnitude={np.max(pos_magnitudes):.1f}")
     
-    # Create meshgrid
+    # Expected peak locations
+    expected_carrier = 1.0 / 3.0
+    expected_lower = expected_carrier - 0.05
+    expected_upper = expected_carrier + 0.05
+    
+    # ========================================================================
+    # Visualization 1: Individual 2D plots (clearest for sideband inspection)
+    # ========================================================================
+    
+    fig1, axes = plt.subplots(2, 2, figsize=(16, 12))
+    axes = axes.flatten()
+    
+    for idx, ((freqs, mags), topic, corr) in enumerate(zip(all_spectra, topics, correlations)):
+        if idx >= 4:
+            break
+            
+        ax = axes[idx]
+        
+        # Plot full spectrum
+        ax.plot(freqs, mags, 'b-', linewidth=1.5, alpha=0.7, label='Spectrum')
+        
+        # Mark expected peaks with vertical lines
+        ax.axvline(expected_lower, color='purple', linestyle='--', 
+                  linewidth=2, alpha=0.7, label=f'Lower SB ({expected_lower:.3f})')
+        ax.axvline(expected_carrier, color='red', linestyle='--', 
+                  linewidth=2, alpha=0.7, label=f'Carrier ({expected_carrier:.3f})')
+        ax.axvline(expected_upper, color='orange', linestyle='--', 
+                  linewidth=2, alpha=0.7, label=f'Upper SB ({expected_upper:.3f})')
+        
+        # Find and mark actual peaks near expected locations
+        for expected_freq, color, name in [
+            (expected_lower, 'purple', 'Lower'),
+            (expected_carrier, 'red', 'Carrier'),
+            (expected_upper, 'orange', 'Upper')
+        ]:
+            # Find peak within ±0.02 of expected
+            mask = np.abs(freqs - expected_freq) < 0.02
+            if np.any(mask):
+                local_freqs = freqs[mask]
+                local_mags = mags[mask]
+                peak_idx = np.argmax(local_mags)
+                peak_freq = local_freqs[peak_idx]
+                peak_mag = local_mags[peak_idx]
+                ax.plot(peak_freq, peak_mag, 'o', color=color, 
+                       markersize=10, markeredgecolor='black', markeredgewidth=1.5)
+                ax.text(peak_freq, peak_mag * 1.1, f'{peak_mag:.1f}', 
+                       ha='center', fontsize=9, fontweight='bold')
+        
+        ax.set_xlabel('Frequency (cycles/step)', fontsize=11, fontweight='bold')
+        ax.set_ylabel('FFT Magnitude', fontsize=11, fontweight='bold')
+        ax.set_title(f'{topic}\n(correlation = {corr:.3f})', fontsize=12, fontweight='bold')
+        ax.set_xlim(0, 0.5)
+        ax.legend(loc='upper right', fontsize=8)
+        ax.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.savefig('sidebands_2d_grid.png', dpi=300, bbox_inches='tight')
+    print("\n✓ Saved: sidebands_2d_grid.png (clearest view)")
+    plt.close()
+    
+    # ========================================================================
+    # Visualization 2: Zoomed 3D waterfall (carrier region only)
+    # ========================================================================
+    
+    # Create meshgrid for carrier region only
+    freq_min, freq_max = 0.2, 0.5
     min_len = min(len(spec[1]) for spec in all_spectra)
-    X = all_spectra[0][0][:min_len//2]
+    
+    # Extract carrier region
+    carrier_spectra = []
+    carrier_freqs = None
+    
+    for freqs, mags in all_spectra:
+        mask = (freqs >= freq_min) & (freqs <= freq_max)
+        if carrier_freqs is None:
+            carrier_freqs = freqs[mask]
+        carrier_spectra.append(mags[mask])
+    
+    # Ensure all same length
+    min_carrier_len = min(len(s) for s in carrier_spectra)
+    X = carrier_freqs[:min_carrier_len]
     Y = np.arange(len(topics))
-    Z = np.array([spectrum[1][:min_len//2] for spectrum in all_spectra])
+    Z = np.array([s[:min_carrier_len] for s in carrier_spectra])
     
     X_grid, Y_grid = np.meshgrid(X, Y)
     
-    # Create animation
-    fig = plt.figure(figsize=(14, 10))
-    ax = fig.add_subplot(111, projection='3d')
+    # Create 3D figure
+    fig2 = plt.figure(figsize=(16, 12))
+    ax = fig2.add_subplot(111, projection='3d')
+    
+    # Surface plot with better colormap
+    surf = ax.plot_surface(X_grid, Y_grid, Z, cmap='plasma', 
+                          alpha=0.8, edgecolor='k', linewidth=0.2)
+    
+    # Mark expected peaks with vertical lines
+    for peak_freq, color, label in [
+        (expected_lower, 'purple', 'Lower SB'),
+        (expected_carrier, 'red', 'Carrier'),
+        (expected_upper, 'orange', 'Upper SB')
+    ]:
+        if freq_min <= peak_freq <= freq_max:
+            peak_idx = np.argmin(np.abs(X - peak_freq))
+            ax.plot([peak_freq]*len(Y), Y, Z[:, peak_idx], 
+                   color=color, linewidth=4, alpha=0.9, label=label)
+            # Add vertical projection lines
+            for y_idx in range(len(Y)):
+                ax.plot([peak_freq, peak_freq], [y_idx, y_idx], [0, Z[y_idx, peak_idx]], 
+                       color=color, linewidth=2, alpha=0.3, linestyle=':')
+    
+    # Individual traces
+    for idx, s in enumerate(carrier_spectra):
+        s_truncated = s[:len(X)]
+        ax.plot(X, [idx]*len(X), s_truncated, 'k-', linewidth=2, alpha=0.8)
+    
+    ax.set_xlabel('Frequency (cycles/step)', fontsize=13, fontweight='bold', labelpad=10)
+    ax.set_ylabel('Topic/Dataset', fontsize=13, fontweight='bold', labelpad=10)
+    ax.set_zlabel('FFT Magnitude', fontsize=13, fontweight='bold', labelpad=10)
+    ax.set_title('3D Frequency Spectrum: Carrier Region Detail\n(Zoomed to Show Sidebands)', 
+                fontsize=15, fontweight='bold', pad=20)
+    
+    ax.set_yticks(Y)
+    ax.set_yticklabels([f"{t}\n(r={c:.2f})" for t, c in zip(topics, correlations)], fontsize=9)
+    ax.set_xlim(freq_min, freq_max)
+    ax.legend(loc='upper left', fontsize=11, framealpha=0.9)
+    ax.grid(True, alpha=0.2)
+    
+    # Better viewing angle
+    ax.view_init(elev=20, azim=135)
+    
+    # Add colorbar
+    fig2.colorbar(surf, ax=ax, shrink=0.5, aspect=5, label='Magnitude')
+    
+    plt.tight_layout()
+    plt.savefig('sidebands_3d_zoomed_static.png', dpi=300, bbox_inches='tight')
+    print("✓ Saved: sidebands_3d_zoomed_static.png (3D carrier region)")
+    plt.close()
+    
+    # ========================================================================
+    # Visualization 3: Animated rotating 3D (carrier region)
+    # ========================================================================
+    
+    fig3 = plt.figure(figsize=(16, 12))
+    ax = fig3.add_subplot(111, projection='3d')
     
     def animate(frame):
         ax.clear()
         
-        # Surface plot
-        surf = ax.plot_surface(X_grid, Y_grid, Z, cmap='viridis', 
-                              alpha=0.7, edgecolor='k', linewidth=0.3)
+        # Surface
+        surf = ax.plot_surface(X_grid, Y_grid, Z, cmap='plasma', 
+                              alpha=0.8, edgecolor='k', linewidth=0.2)
         
-        # Mark expected peaks
-        expected_carrier = 1.0 / 3.0
-        expected_lower = expected_carrier - 0.05
-        expected_upper = expected_carrier + 0.05
-        
+        # Peak markers
         for peak_freq, color, label in [
-            (expected_lower, 'purple', 'Lower SB (0.283)'),
-            (expected_carrier, 'red', 'Carrier (0.333)'),
-            (expected_upper, 'orange', 'Upper SB (0.383)')
+            (expected_lower, 'purple', 'Lower SB'),
+            (expected_carrier, 'red', 'Carrier'),
+            (expected_upper, 'orange', 'Upper SB')
         ]:
-            if peak_freq <= X.max():
+            if freq_min <= peak_freq <= freq_max:
                 peak_idx = np.argmin(np.abs(X - peak_freq))
                 ax.plot([peak_freq]*len(Y), Y, Z[:, peak_idx], 
-                       color=color, linewidth=3, alpha=0.9, label=label)
+                       color=color, linewidth=4, alpha=0.9, label=label)
         
-        # Individual traces
-        for idx, (_, mags) in enumerate(all_spectra):
-            mags_truncated = mags[:len(X)]
-            ax.plot(X, [idx]*len(X), mags_truncated, 'k-', linewidth=1.2, alpha=0.7)
+        # Traces
+        for idx, s in enumerate(carrier_spectra):
+            s_truncated = s[:len(X)]
+            ax.plot(X, [idx]*len(X), s_truncated, 'k-', linewidth=2, alpha=0.8)
         
-        ax.set_xlabel('Frequency (cycles/step)', fontsize=12, fontweight='bold')
-        ax.set_ylabel('Topic/Dataset', fontsize=12, fontweight='bold')
-        ax.set_zlabel('FFT Magnitude', fontsize=12, fontweight='bold')
-        ax.set_title('3D Frequency Spectrum: Lexical Diversity Modulation\n(Enhanced TTR Control)', 
-                    fontsize=14, fontweight='bold')
+        ax.set_xlabel('Frequency (cycles/step)', fontsize=13, fontweight='bold')
+        ax.set_ylabel('Dataset', fontsize=13, fontweight='bold')
+        ax.set_zlabel('FFT Magnitude', fontsize=13, fontweight='bold')
+        ax.set_title('3D Spectrum: Carrier & Sidebands (Rotating)', 
+                    fontsize=15, fontweight='bold')
         
         ax.set_yticks(Y)
-        ax.set_yticklabels([f"{t}\n(r={c:.2f})" for t, c in zip(topics, correlations)], fontsize=8)
-        ax.set_xlim(0, 0.5)
-        ax.legend(loc='upper right', fontsize=9)
+        ax.set_yticklabels([f"{t[:15]}" for t in topics], fontsize=8)
+        ax.set_xlim(freq_min, freq_max)
+        ax.legend(loc='upper left', fontsize=10)
         ax.grid(True, alpha=0.2)
         
         # Rotate
-        ax.view_init(elev=25, azim=frame)
+        ax.view_init(elev=20, azim=frame)
         
         return surf,
     
-    print("\nCreating animation...")
-    anim = FuncAnimation(fig, animate, frames=np.arange(0, 360, 2), 
+    print("\nCreating animated GIF...")
+    anim = FuncAnimation(fig3, animate, frames=np.arange(0, 360, 2), 
                         interval=50, blit=False)
     
     writer = PillowWriter(fps=20)
-    anim.save('lexical_diversity_3d_enhanced.gif', writer=writer, dpi=100)
-    print("✓ Saved: lexical_diversity_3d_enhanced.gif")
-    
-    # Static image
-    fig = plt.figure(figsize=(14, 10))
-    ax = fig.add_subplot(111, projection='3d')
-    animate(45)
-    plt.savefig('lexical_diversity_3d_enhanced_static.png', dpi=300, bbox_inches='tight')
-    print("✓ Saved: lexical_diversity_3d_enhanced_static.png")
+    anim.save('sidebands_3d_rotating.gif', writer=writer, dpi=100)
+    print("✓ Saved: sidebands_3d_rotating.gif")
     plt.close()
+    
+    # ========================================================================
+    # Visualization 4: Peak magnitude comparison
+    # ========================================================================
+    
+    fig4, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+    
+    # Extract peak magnitudes
+    peak_data = {
+        'Lower SB': [],
+        'Carrier': [],
+        'Upper SB': []
+    }
+    
+    for freqs, mags in all_spectra:
+        for expected_freq, name in [
+            (expected_lower, 'Lower SB'),
+            (expected_carrier, 'Carrier'),
+            (expected_upper, 'Upper SB')
+        ]:
+            mask = np.abs(freqs - expected_freq) < 0.02
+            if np.any(mask):
+                peak_mag = np.max(mags[mask])
+                peak_data[name].append(peak_mag)
+            else:
+                peak_data[name].append(0)
+    
+    # Bar chart
+    x = np.arange(len(topics))
+    width = 0.25
+    
+    ax1.bar(x - width, peak_data['Lower SB'], width, label='Lower SB', color='purple', alpha=0.8)
+    ax1.bar(x, peak_data['Carrier'], width, label='Carrier', color='red', alpha=0.8)
+    ax1.bar(x + width, peak_data['Upper SB'], width, label='Upper SB', color='orange', alpha=0.8)
+    
+    ax1.set_xlabel('Dataset', fontsize=12, fontweight='bold')
+    ax1.set_ylabel('Peak Magnitude', fontsize=12, fontweight='bold')
+    ax1.set_title('Peak Magnitudes Comparison', fontsize=13, fontweight='bold')
+    ax1.set_xticks(x)
+    ax1.set_xticklabels([t[:15] for t in topics], rotation=45, ha='right')
+    ax1.legend()
+    ax1.grid(True, alpha=0.3, axis='y')
+    
+    # Sideband ratios
+    ratios_lower = [l/c if c > 0 else 0 for l, c in zip(peak_data['Lower SB'], peak_data['Carrier'])]
+    ratios_upper = [u/c if c > 0 else 0 for u, c in zip(peak_data['Upper SB'], peak_data['Carrier'])]
+    
+    ax2.bar(x - width/2, ratios_lower, width, label='Lower SB / Carrier', color='purple', alpha=0.8)
+    ax2.bar(x + width/2, ratios_upper, width, label='Upper SB / Carrier', color='orange', alpha=0.8)
+    ax2.axhline(y=0.32, color='green', linestyle='--', linewidth=2, label='Expected (~0.32)')
+    
+    ax2.set_xlabel('Dataset', fontsize=12, fontweight='bold')
+    ax2.set_ylabel('Sideband / Carrier Ratio', fontsize=12, fontweight='bold')
+    ax2.set_title('Sideband Symmetry Analysis', fontsize=13, fontweight='bold')
+    ax2.set_xticks(x)
+    ax2.set_xticklabels([t[:15] for t in topics], rotation=45, ha='right')
+    ax2.legend()
+    ax2.grid(True, alpha=0.3, axis='y')
+    
+    plt.tight_layout()
+    plt.savefig('sideband_analysis.png', dpi=300, bbox_inches='tight')
+    print("✓ Saved: sideband_analysis.png (peak analysis)")
+    plt.close()
+    
+    print("\n" + "="*70)
+    print("VISUALIZATION COMPLETE")
+    print("="*70)
+    print("\nGenerated files:")
+    print("  1. sidebands_2d_grid.png - Clearest individual spectra view")
+    print("  2. sidebands_3d_zoomed_static.png - 3D view of carrier region")
+    print("  3. sidebands_3d_rotating.gif - Animated 3D rotation")
+    print("  4. sideband_analysis.png - Peak magnitude comparison")
+    print("\nBest for sideband inspection: sidebands_2d_grid.png")
 
 
 if __name__ == "__main__":
-    # Topics to generate
-    topics = [
-        "artificial intelligence",
-        "climate science",
-        "quantum physics",
-        "space exploration"
-    ]
-    
-    # Step 1: Generate all datasets
-    print("STEP 1: Generating high-quality datasets...")
-    generate_all_datasets(topics, n_sentences=100)
-    
-    # Step 2: Create 3D visualization
-    print("\nSTEP 2: Creating 3D visualization...")
-    create_3d_waterfall_gif()
-    
-    print("\n" + "="*70)
-    print("COMPLETE!")
-    print("="*70)
-    print("\nGenerated files:")
-    print("  - nanogpt_*_data.json (datasets with correlation >0.85)")
-    print("  - lexical_diversity_3d_enhanced.gif")
-    print("  - lexical_diversity_3d_enhanced_static.png")
-    print("\nDownload:")
-    print("  scp -P 14592 -i ~/.ssh/id_ed25519 root@160.250.71.211:/workspace/nanoGPT/lexical_diversity_3d_enhanced.gif ~/Downloads/")
+    create_improved_3d_visualization()
